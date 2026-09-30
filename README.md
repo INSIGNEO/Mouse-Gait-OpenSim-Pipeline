@@ -31,7 +31,7 @@ Run OpenSim multibody dynamics simulations to estimate muscle and joint forces
 
 ## Requirements
 
-MATLAB R2022b or newer
+MATLAB R2024a or newer
 
 OpenSim 4.4 or newer
 
