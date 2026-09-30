@@ -78,7 +78,7 @@ for i = 1:length(bone_names)
     source_pc = pointCloud(ct_init);
     target_pc = pointCloud(os_pts);
     [tform_icp, ~, rmse] = pcregistericp(source_pc, target_pc, ...
-        'Metric', 'pointToPoint', 'MaxIterations', 500, 'Extrapolate', true, 'Tolerance', [0.00000001,0.00000005], 'InlierRatio', 0.9);
+        'Metric', 'pointToPoint', 'MaxIterations', 500, 'Tolerance', [0.00000001,0.00000005], 'InlierRatio', 0.9);
     
     % 5. Build Combined 4x4 Matrix
     % This accounts for: [Raw CT] -> [Rotate] -> [Translate] -> [ICP]
