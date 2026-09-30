@@ -21,13 +21,13 @@ output_file = fullfile(output_folder, ...
 % [Roll(X), Pitch(Y), Yaw(Z)]
 rot_adjust.pelvis = [90, 90, 90];
 rot_adjust.thigh_r  = [90, 0, 0];  % e.g., [90, 0, 0] if rotated 90 deg on X
-rot_adjust.leg_r  = [0, 180, 180];
+rot_adjust.leg_r  = [0, 90, 180];
 rot_adjust.foot_r   = [0, 180, 180];
 
 full_path = strcat(mouse_age,'/',mouse_name,'/CT_data');
 cd(full_path)
 % File definitions
-bones.pelvis.ct = "CT_Right_Pelvis.stl"; bones.pelvis.osim = "../../../STL_opensim/Pelvis_r.stl";
+bones.pelvis.ct = "CT_Right_Pelvis.stl"; bones.pelvis.osim = "../../../STL_opensim/Original_right_pelvis.stl";
 bones.thigh_r.ct  = "CT_Right_Femur.stl";  bones.thigh_r.osim  = "../../../STL_opensim/femur_r.stl";
 bones.leg_r.ct  = "CT_Right_Tibia.stl";  bones.leg_r.osim  = "../../../STL_opensim/tibfib_r.stl";
 bones.foot_r.ct   = "CT_Right_Foot.stl";   bones.foot_r.osim   = "../../../STL_opensim/full_foot_r.stl";
