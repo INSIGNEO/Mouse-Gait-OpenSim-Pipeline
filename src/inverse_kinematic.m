@@ -4,9 +4,9 @@ import org.opensim.modeling.*
 
 %% Inverse kinematic
 % 1. Setup File Paths
-mouse_age = "22weeks";
-mouse_name = "Cage51R";
-trcName = 'cage51R22weeks4_StanceNorm_01.trc';
+mouse_age = "20weeks";
+mouse_name = "Cage51L";
+trcName = 'cage51L20weeks1_StanceNorm_02.trc';
 
 modelFile  = strcat(mouse_age,'/',mouse_name,'/Model_data/Model_mouse_right_markers.osim');
 trcFile    = strcat(mouse_age,'/',mouse_name,'/Model_data/',trcName);
@@ -24,7 +24,7 @@ ikTool.setModel(model);
 ikTool.setMarkerDataFileName(trcFile);
 ikTool.setResultsDir(resultsDir);
 
-% 4. Custom Marker Weighting
+% 4. Custom Marker and Coordinate Weighting
 % Define your weights in a Map or Cell array
 markerWeights = {
     'Right_Illiac', 1.0; 
@@ -52,14 +52,23 @@ for i = 1:size(markerWeights, 1)
 end
 
 % 5. Lock/Unlock Degrees of Freedom (Coordinate Tasks)
-% Locking a coordinate forces IK to ignore the marker data for that DOF
-coordsToLock = {'zR_TorsoToPelvis', 'MTP_flexion_r'};
+% Locking/Unlocking a coordinate forces IK to ignore or consider the marker data for that DOF
+coordsToLock = {'zR_TorsoToPelvis', 'MTP_flexion_r', 'Hip_rotation_r', 'Knee_rotation_r'};
+coordsToUnlock = {'PelvisToGround_Rx', 'PelvisToGround_Ry'};
 
 for i = 1:length(coordsToLock)
     coordName = coordsToLock{i};
     if model.getCoordinateSet().contains(coordName)
         % Set the coordinate to locked in the model itself
         model.getCoordinateSet().get(coordName).set_locked(true);
+    end
+end
+
+for i = 1:length(coordsToUnlock)
+    coordName = coordsToUnlock{i};
+    if model.getCoordinateSet().contains(coordName)
+        % Set the coordinate to unlocked in the model itself
+        model.getCoordinateSet().get(coordName).set_locked(false);
     end
 end
 
@@ -90,6 +99,21 @@ motionFile = strcat(mouse_age,'/',mouse_name,'/Model_data/ik_results_output.mot'
 grfFile = strcat(mouse_age,'/',mouse_name,'/Model_data/', trcName(1:end-4),'_grf.mot');
 grfXML = strcat(mouse_age,'/',mouse_name,'/Model_data/', trcName(1:end-4),'_grf.xml');
 markerRadius = 0.0005; 
+
+% Force plate visualization parameters
+plateTName = strcat(mouse_age,'/',mouse_name,'/Model_data/', trcName(1:end-4),'_TranslationMatrix.mat');
+plateRName = strcat(mouse_age,'/',mouse_name,'/Model_data/', trcName(1:end-4),'_RotationMatrix.mat');
+plateT = load(plateTName).T/1000;
+plateR = load(plateRName).R;
+plateDimension = 152.4/1000; % 6 inch 
+plateHeight = 0; % Distance between the wand markers and the plate
+platePoint1 = [-0.5*plateDimension, 0.5*plateDimension, -plateHeight];
+platePoint2 = [0.5*plateDimension, 0.5*plateDimension, -plateHeight];
+platePoint3 = [0.5*plateDimension, -0.5*plateDimension, -plateHeight];
+platePoint4 = [-0.5*plateDimension, -0.5*plateDimension, -plateHeight];
+plateVertices = [platePoint1; platePoint2; platePoint3; platePoint4];
+
+plateVerticesNew = plateVertices*plateR' + plateT';
 
 % Read the GRF file
 grfTable = readtable(grfFile,'FileType','text','Delimiter','\t','HeaderLines',4);
@@ -202,6 +226,9 @@ end
 %% Ground reaction force arrow
 GRFscale = 0.1; % adjust visually
 grfHandle = quiver3( 0,0,0,0,0,0,'LineWidth',2,'MaxHeadSize',0.5);
+
+% Force plate
+patch('Faces', [1, 2, 3, 4], 'Vertices', plateVerticesNew, 'FaceColor', [0.8, 0.8, 0.8], 'EdgeColor', 'k', 'FaceAlpha', 0.5);
 
 % --- 4. ANIMATION LOOP ---
 CoP = zeros(nFrames,3);
