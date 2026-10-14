@@ -9,6 +9,8 @@ Register segmented mouse hindlimb bones and experimental marker positions to a t
 
 Update marker locations in the OpenSim model
 
+Scale bones and muscles coordinate according to the segmented bones registered
+
 Import Vicon C3D files
 
 Clean and filter marker trajectories
@@ -36,6 +38,8 @@ MATLAB R2024a or newer
 OpenSim 4.4 or newer
 
 BTK Toolbox for MATLAB 0.3.0 or newer
+
+vtkToolbox
 
 ## Installation
 
