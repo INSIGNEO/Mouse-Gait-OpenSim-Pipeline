@@ -5,7 +5,10 @@ clc; clear; close all;
 % ==============================
 % Mouse number
 mouse_age = "22weeks";
-mouse_name = "Cage51L";
+mouse_name = "Cage5none";
+
+% Anatomical scaling (scale the bones and muscle path points)
+anatomicalScaling = true;
 
 unit_conversion = 0.1; % CT(mm) to OpenSim(cm)
 
@@ -22,7 +25,7 @@ output_file = fullfile(output_folder, ...
 rot_adjust.pelvis = [90, 90, 90];
 rot_adjust.thigh_r  = [90, 0, 0];  % e.g., [90, 0, 0] if rotated 90 deg on X
 rot_adjust.leg_r  = [0, 90, 180];
-rot_adjust.foot_r   = [0, 180, 180];
+rot_adjust.foot_r   = [0, 90, 180]; % [0, 180, 180]
 
 full_path = strcat(mouse_age,'/',mouse_name,'/CT_data');
 cd(full_path)
@@ -104,22 +107,15 @@ for i = 1:length(bone_names)
     
     % title(sprintf("%s (RMSE: %.4f)", name, rmse));
     axis equal; grid off; view(3); camlight; lighting gouraud;
-    
+
     % Get dimensions (Bounding Box)
     ct_dim = max(ct_v_homog(:,1:3)) - min(ct_v_homog(:,1:3));
     os_dim = max(os_tri.Points) - min(os_tri.Points);
     
     % Scale Factor = CT / OpenSim
     % Using a safety check to avoid division by zero
-    if i==1
-        scale_xyz = ct_dim ./ os_dim;
-    end
-   % if i==4
-   %     scale_xyz(:) = 1;
-   % elseif i==8
-   %     scale_xyz(:) = 1;
-   % end
-    bone_scales.(name) = scale_xyz./100;
+    scale_xyz = ct_dim ./ os_dim;
+    bone_scales.(name) = scale_xyz;
     
     fprintf("%s Scale Factors: [X:%.4f, Y:%.4f, Z:%.4f]\n", name, scale_xyz(1), scale_xyz(2), scale_xyz(3));
 
@@ -139,19 +135,17 @@ for i = 1:length(marker_names)
     results(i, :) = m_pos_homog(1:3);
     
     hold on
-    plot3(results(i,1), results(i,2), results(i,3), 'ko', 'MarkerSize', 20, 'MarkerFaceColor', 'm');
+    plot3(results(i,1), results(i,2), results(i,3), 'ko', 'MarkerSize', 10, 'MarkerFaceColor', [1.0, 0.41, 0.70]);
     % text(results(i,1), results(i,2), results(i,3), m_name, 'FontSize', 20);
 end
 
-%% ---- UPDATE OSIM FILE ----
-cd('../../')
-
 %% ---- UPDATE OSIM FILE (MARKERS + SCALING) ----
 % Load the XML document
+cd('../../')
 dom = xmlread(osim_input_file);
 all_markers = dom.getElementsByTagName('Marker');
 
-% 1. Update Markers 
+%% 1. Update Markers 
 for k = 0:all_markers.getLength - 1
     this_marker = all_markers.item(k);
     
@@ -177,59 +171,265 @@ for k = 0:all_markers.getLength - 1
     end
 end
 
-% 2. Update Body Scaling
-% OpenSim stores scaling in <ScaleSet> usually, but for a simplified 
-% direct mesh-to-model personalization, we target the <Body> scale or 
-% simply report these for the Scale Tool. 
-% If you want to modify the Body 'mass_center' or 'inertia' it's complex, 
-% but here is how you find the Body to update its 'attached_geometry' scale:
+%% 2 Update bones (Scaling)
+if anatomicalScaling == true
+    % File and folder names
+    vtpNames = {"../STL_opensim/Pelvis_r.vtp",
+                "../STL_opensim/femur_r.vtp",
+                "../STL_opensim/patella_r.vtp",
+                "../STL_opensim/tibfib_r.vtp",
+                "../STL_opensim/foot_r.vtp",
+                "../STL_opensim/phalanges_r.vtp"};
+    
+    vtpScaleFactors = [bone_scales.pelvis;
+                       bone_scales.thigh_r;
+                       bone_scales.leg_r;
+                       bone_scales.leg_r;
+                       bone_scales.foot_r;
+                       bone_scales.foot_r];
+    
+    vtpOutputNames = {'pelvis','femur','patella','tibia','foot','toes'};
+    
+    output_vtp = strcat(output_folder,'Geometry/');
+    scaled_mesh_folder = output_vtp;
+    
+    scaledMeshMatrix = cell(length(vtpNames),1);
+    
+    for ivtp = 1:length(vtpNames)
+        % Output VTP file
+        scaled_mesh_file = fullfile(scaled_mesh_folder,strcat(vtpOutputNames{ivtp},'_scaled.vtp'));
+        % Read VTP using VTK
+        %% 1. Read the original VTP mesh
+        % vtkRead returns a MATLAB structure.
+        mesh = vtkRead(char(vtpNames{ivtp}));
+        
+        % Check that the mesh contains points
+        if ~isfield(mesh, 'points') || isempty(mesh.points)
+            error('No mesh points found in: %s', vtpNames{ivtp});
+        end
+        
+        vertices = mesh.points;
+        
+        %% 2. Scale vertices around their centroid
+        centroid = mean(vertices, 1);
+        
+        vertices_scaled = ...
+            (vertices - centroid) .* reshape(vtpScaleFactors(ivtp,:), 1, 3) + centroid;
+        
+        % Replace only the vertex coordinates.
+        % Preserve connectivity and associated mesh data.
+        mesh.points = vertices_scaled;
+        
+        %% 3. Write the scaled mesh
+        vtkWrite(mesh, char(scaled_mesh_file), 'false', 'ascii');
+    
+        fprintf('Saved scaled VTP mesh:\n%s\n', scaled_mesh_file);
+    
+    
+        
+        % Read VTP file
+        vtp_text = fileread(scaled_mesh_file);
+    
+        % Identify the first and last delimiters
+        start_tag = '<InformationKey name="L2_NORM_RANGE" location="vtkDataArray" length="2">';
+        end_tag   = '</InformationKey>';
+    
+        start_idx = strfind(vtp_text, start_tag);
+        end_idx   = strfind(vtp_text, end_tag);
+    
+        if ~isempty(start_idx) && ~isempty(end_idx)
+    
+            % Select the first matching block
+            start_idx = start_idx(1);
+            end_candidates = end_idx(end_idx >= start_idx);
+            end_idx = end_candidates(1) + length(end_tag) - 1;
+    
+            % Remove everything from the opening to closing tag
+            vtp_text(start_idx:end_idx) = [];
+    
+            % Write the modified file
+            fid = fopen(scaled_mesh_file, 'w');
+    
+            if fid == -1
+                error('Could not open VTP file for writing.');
+            end
+    
+            fwrite(fid, vtp_text, 'char');
+            fclose(fid);
+        end
+    end
+    
+    % Change file names in the opensim model file
+    all_bodies = dom.getElementsByTagName('Body');
+    bone_names{5} = 'toes_r';
+    for k = 0:all_bodies.getLength - 1
+        this_body = all_bodies.item(k);
+        % Get the XML body name
+        xml_body_name = char(this_body.getAttribute('name'));
+    
+        % Match body name to our bone names (case-insensitive)
+        for b = 1:length(bone_names)
+            if strcmpi(xml_body_name, bone_names{b})
+                % 1. Update FrameGeometry (the axes display)
+                attached_geoms = this_body.getElementsByTagName('attached_geometry');
+                if attached_geoms.getLength > 0
+                    % Get the mesh_file XML element
+                    mesh_file_node = attached_geoms.item(0).getElementsByTagName('mesh_file').item(0);
+                    if ~isempty(mesh_file_node)
+                        % Store a path relative to the output .osim file
+                        if b>3
+                        mesh_filename = strcat(vtpOutputNames{b+1},'_scaled.vtp');
+                        else
+                        mesh_filename = strcat(vtpOutputNames{b},'_scaled.vtp');
+                        end
+                        % Update the XML element
+                        mesh_file_node.getFirstChild.setData(mesh_filename);
+                    
+                        fprintf('Updated mesh path: %s\n', mesh_filename);
+                    end
+                    if b == 3
+                        mesh_file_node_2 = attached_geoms.item(0).getElementsByTagName('mesh_file').item(1);
+                        mesh_filename_2 = strcat(vtpOutputNames{b+1},'_scaled.vtp');
+                        mesh_file_node_2.getFirstChild.setData(mesh_filename_2);
+                    end
+                end
+            end
+        end
+    end
+    
+    %% ---- SCALE MUSCLE PATH POINTS ----
+    % Assumptions:
+    % 1. Muscle path-point coordinates are in their parent body's local frame.
+    % 2. body_centroids_local contains each mesh centroid expressed in
+    %    the corresponding OpenSim body-local frame.
+    % 3. Centroids and path-point coordinates use the same units.
+    
+    % ---- CALCULATE BODY CENTROIDS FROM VTP MESHES ----
+    
+    body_names = {'Pelvis', 'Thigh_r', 'Leg_r', 'Foot_r', 'Toes_r'};
+    vtpBodyNames = {'pelvis','femur','tibia','foot','toes'};
+    
+    body_centroids_local = struct();
+    
+    for i = 1:numel(body_names)
+    
+        body_name = body_names{i};
+    
+        % Path to the corresponding VTP mesh
+        vtp_file = fullfile(scaled_mesh_folder,strcat(vtpBodyNames{i},'_scaled.vtp'));
+    
+        % Read mesh using the MATLAB VTK toolbox
+        mesh = vtkRead(char(vtp_file));
+    
+        if ~isfield(mesh, 'points') || isempty(mesh.points)
+            error('No vertices found in VTP mesh: %s', vtp_file);
+        end
+    
+        % Mesh vertices in their existing coordinate system
+        vertices = double(mesh.points);
+    
+        % Calculate vertex centroid
+        body_centroids_local.(body_name) = mean(vertices, 1);
+    
+        fprintf('%s centroid: [%.6f %.6f %.6f]\n', ...
+            body_name, ...
+            body_centroids_local.(body_name)(1), ...
+            body_centroids_local.(body_name)(2), ...
+            body_centroids_local.(body_name)(3));
+    end
+    
+    % Map body names to their corresponding scaling factors.
+    body_scale_map = struct();
+    body_scale_map.Pelvis = bone_scales.pelvis;
+    body_scale_map.Thigh_r = bone_scales.thigh_r;
+    body_scale_map.Leg_r = bone_scales.leg_r;
+    body_scale_map.Foot_r = bone_scales.foot_r;
+    body_scale_map.Toes_r = bone_scales.foot_r;
+    
+    % These centroids must be calculated in the local body frames.
+    % Example structure:
+    % body_centroids_local.thigh_r = [cx, cy, cz];
+    
+    point_types = {'PathPoint', ...
+                   'ConditionalPathPoint', ...
+                   'MovingPathPoint'};
+    
+    for p = 1:numel(point_types)
+    
+        all_points = dom.getElementsByTagName(point_types{p});
+    
+        for k = 0:all_points.getLength-1
+    
+            point_node = all_points.item(k);
+    
+            % Identify the parent frame.
+            frame_node = point_node.getElementsByTagName( ...
+                'socket_parent_frame').item(0);
+    
+            if ~isempty(frame_node) && ~isempty(frame_node.getFirstChild)
+                frame_name = char(frame_node.getFirstChild.getData());
+    
+                % Handle paths such as /bodyset/thigh_r
+                parts = strsplit(strtrim(frame_name), '/');
+                body_name = parts{end};
+    
+            else
+                % Compatibility with older OpenSim XML formats.
+                body_node = point_node.getElementsByTagName('body').item(0);
+    
+                if isempty(body_node) || isempty(body_node.getFirstChild)
+                    continue
+                end
+    
+                body_name = strtrim(char(body_node.getFirstChild.getData()));
+            end
+    
+            % Only process points whose parent body has defined scaling.
+            if ~isfield(body_scale_map, body_name)
+                continue
+            end
+    
+            if ~isfield(body_centroids_local, body_name)
+                warning('Missing local centroid for body %s', body_name);
+                continue
+            end
+    
+            % Read original local coordinates.
+            location_node = point_node.getElementsByTagName( ...
+                'location').item(0);
+    
+            if isempty(location_node) || isempty(location_node.getFirstChild)
+                continue
+            end
+    
+            xyz = sscanf(char(location_node.getFirstChild.getData()), ...
+                '%f', 3)';
+    
+            if numel(xyz) ~= 3
+                continue
+            end
+    
+            % Centroid and scale for this parent body.
+            c = body_centroids_local.(body_name)*0.01;
+            s = body_scale_map.(body_name);
+    
+            % Scale around the body-specific mesh centroid.
+            xyz_scaled = (xyz - c) .* s + c;
+    
+            % Write the new coordinates.
+            new_location = sprintf('%.10f %.10f %.10f', ...
+                xyz_scaled(1), xyz_scaled(2), xyz_scaled(3));
+    
+            location_node.getFirstChild.setData(new_location);
+    
+            fprintf('Scaled %s point on %s\n', ...
+                point_types{p}, body_name);
+    
+        end
+    end
+end
 
-% all_bodies = dom.getElementsByTagName('Body');
-% for k = 0:all_bodies.getLength - 1
-%     this_body = all_bodies.item(k);
-%     % Get the XML body name
-%     xml_body_name = char(this_body.getAttribute('name'));
-% 
-%     % Match body name to our bone names (case-insensitive)
-%     for b = 1:length(bone_names)
-%         if strcmpi(xml_body_name, bone_names{b})
-%             s = bone_scales.(bone_names{b});
-%             s_str = sprintf('%.10f %.10f %.10f', s(1), s(2), s(3));
-% 
-%             % 1. Update FrameGeometry (the axes display)
-%             frame_geoms = this_body.getElementsByTagName('FrameGeometry');
-%             if frame_geoms.getLength > 0
-%                 sf_node = frame_geoms.item(0).getElementsByTagName('scale_factors').item(0);
-%                 if ~isempty(sf_node)
-%                     sf_node.getFirstChild.setData(s_str);
-%                 end
-%             end
-% 
-%             % 2. Update all Mesh geometries (Pelvis_l, Pelvis_r, etc.)
-%             % We look for 'Mesh' tags specifically
-%             meshes = this_body.getElementsByTagName('Mesh');
-%             if meshes.getLength > 0
-%                 fprintf("Body %s: Found %d meshes to scale.\n", xml_body_name, meshes.getLength);
-%                 for m = 0:meshes.getLength - 1
-%                     this_mesh = meshes.item(m);
-%                     % Update <scale_factors>
-%                     sf_nodes = this_mesh.getElementsByTagName('scale_factors');
-%                     if sf_nodes.getLength > 0
-%                         sf_nodes.item(0).getFirstChild.setData(s_str);
-% 
-%                         % Print verification
-%                         m_file = char(this_mesh.getElementsByTagName('mesh_file').item(0).getFirstChild.getData());
-%                         fprintf("  -> Updated scale for [%s] to [%s]\n", m_file, s_str);
-%                     end
-%                 end
-%             else
-%                 fprintf("Body %s: No <Mesh> tags found.\n", xml_body_name);
-%             end
-%         end
-%     end
-% end
-
-% Save the modified XML
+%% Save the modified XML
 if ~exist(output_folder,'dir')
     mkdir(output_folder);
 end
